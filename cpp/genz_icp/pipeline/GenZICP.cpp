@@ -91,9 +91,9 @@ GenZICP::Vector3dVectorTuple GenZICP::RegisterFrame(const std::vector<Eigen::Vec
         3.0 * sigma, 
         sigma / 3.0,
         threshold_param_to_pass,       // Tham số giá trị (0.06 hoặc 0.2)
-        config_.use_adaptive_planarity // Cờ (True/False)
+        config_.use_adaptive_planarity, // Cờ (True/False)
         config_.min_adaptive_threshold,
-        config_.max_adaptive_threshold
+        config_.max_adaptive_threshold,
     );
     const auto model_deviation = initial_guess.inverse() * new_pose;
     adaptive_threshold_.UpdateModelDeviation(model_deviation);
