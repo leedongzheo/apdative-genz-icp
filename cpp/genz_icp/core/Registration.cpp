@@ -76,7 +76,7 @@ std::tuple<bool, Eigen::Vector3d> EstimateNormalAndPlanarity(
     double final_threshold;
     if (use_adaptive) {
         // Truyền min/max vào hàm tính toán
-        final_threshold = ComputeAdaptiveThreshold(neighbors, threshold_param, min_thr, max_thr);
+        final_threshold = ComputeAdaptivePlaharityThreshold(neighbors, threshold_param, min_thr, max_thr);
     } else {
         final_threshold = threshold_param;
     }
@@ -297,7 +297,7 @@ std::tuple<Sophus::SE3d, std::vector<Eigen::Vector3d>, std::vector<Eigen::Vector
             voxel_map, 
             max_correspondence_distance, 
             adaptive_base, // Truyền tham số này (nó chứa giá trị threshold cần dùng)
-            use_adaptive   // Truyền cờ
+            use_adaptive,   // Truyền cờ
             min_thr, // Truyền đi
             max_thr  // Truyền đi
         );
