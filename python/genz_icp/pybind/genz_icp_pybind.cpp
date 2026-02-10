@@ -35,7 +35,7 @@ PYBIND11_MODULE(genz_icp_pybind, m) {
         .def_readwrite("planarity_threshold", &pipeline::GenZConfig::planarity_threshold)
         .def_readwrite("deskew", &pipeline::GenZConfig::deskew)
         .def_readwrite("max_num_iterations", &pipeline::GenZConfig::max_num_iterations)
-        .def_readwrite("convergence_criterion", &pipeline::GenZConfig::convergence_criterion);
+        .def_readwrite("convergence_criterion", &pipeline::GenZConfig::convergence_criterion)
         // === [THÊM CÁC DÒNG NÀY] ===
         .def_readwrite("use_adaptive_planarity", &pipeline::GenZConfig::use_adaptive_planarity)
         .def_readwrite("adaptive_threshold_base", &pipeline::GenZConfig::adaptive_threshold_base)
