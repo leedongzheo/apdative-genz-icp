@@ -47,7 +47,6 @@ struct GenZConfig {
     // th parms
     double min_motion_th = 0.1;
     double initial_threshold = 2.0;
-    double planarity_threshold = 0.1;
 
     // Motion compensation
     bool deskew = false;
