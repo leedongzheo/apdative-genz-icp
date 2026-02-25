@@ -32,69 +32,76 @@ struct HybridCorrespondence {
 };
 
 // --- Adaptive Threshold Functions ---
-
-// [SỬA 1] Thêm tham số base vào hàm, không fix cứng nữa
-double ComputeAdaptivePlaharityThreshold(const std::vector<Eigen::Vector3d>& neighbors, double base, double min_thr, double max_thr){
-    // constexpr double min_thr = 0.001;
-    // constexpr double max_thr = 0.2;
+double ComputeAdaptivePlanarityThreshold(size_t num_neighbors, double base, double min_thr, double max_thr){
     constexpr double ref_neighbors = 20.0;
-
-    double thr = base * ref_neighbors / std::max(ref_neighbors, static_cast<double>(neighbors.size()));
-    return std::clamp(thr, min_thr, max_thr); // Dùng biến truyền vào;
+    // Tránh chia cho 0 và giới hạn mẫu
+    double n = std::max(ref_neighbors, static_cast<double>(num_neighbors));
+    double thr = base * ref_neighbors / n;
+    return std::clamp(thr, min_thr, max_thr);
 }
 
-// [SỬA 2] Nhận adaptive_base và truyền tiếp
+// [TỐI ƯU HÓA] Tính Toán 1-Pass Covariance giống hệt bản Gốc
 std::tuple<bool, Eigen::Vector3d> EstimateNormalAndPlanarity(
     const std::vector<Eigen::Vector3d>& neighbors, 
-    double threshold_param, // Biến này có thể là base hoặc fixed threshold tùy cờ
+    double threshold_param, 
     bool use_adaptive,
-    double min_thr, // Mới
-    double max_thr  // Mới
+    double min_thr, 
+    double max_thr 
     )
 {
-    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
-    for (const auto& pt : neighbors) mean += pt;
-    mean /= static_cast<double>(neighbors.size());
+    const size_t n = neighbors.size();
+    Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
 
-    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    // Tính tổng và tổng bình phương trong cùng 1 vòng lặp (1-pass)
     for (const auto& pt : neighbors) {
-        Eigen::Vector3d d = pt - mean;
-        cov.noalias() += d * d.transpose();
+        centroid += pt;
+        covariance.noalias() += pt * pt.transpose();
     }
-    cov /= static_cast<double>(neighbors.size());
 
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
+    // Hoàn thiện ma trận hiệp phương sai
+    double inv_n = 1.0 / static_cast<double>(n);
+    centroid *= inv_n;
+    covariance *= inv_n;
+    covariance.noalias() -= centroid * centroid.transpose();
+
+    // Chạy Eigen Solver
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(covariance, Eigen::ComputeEigenvectors);
     const auto& evals = eig.eigenvalues();
     const auto& evecs = eig.eigenvectors();
 
-    const double lambda0 = evals(0);
-    const double sumlam  = evals(0) + evals(1) + evals(2) + 1e-12;
-    const double planarity = lambda0 / sumlam;
+    // Trong Eigen, eigenvalues được sắp xếp tăng dần: evals(0) nhỏ nhất, evals(2) lớn nhất
+    const double lambda3 = evals(0); 
+    const double lambda2 = evals(1);
+    const double lambda1 = evals(2);
+    
+    const double sumlam  = lambda1 + lambda2 + lambda3 + 1e-12;
+    const double planarity = lambda3 / sumlam; // Công thức Gốc
 
-    // Truyền adaptive_base vào hàm tính threshold
-    // double adaptive_thr = ComputeAdaptivePlaharityThreshold(neighbors, adaptive_base);
+    // Tính Threshold
     double final_threshold;
     if (use_adaptive) {
-        // Truyền min/max vào hàm tính toán
-        final_threshold = ComputeAdaptivePlaharityThreshold(neighbors, threshold_param, min_thr, max_thr);
+        final_threshold = ComputeAdaptivePlanarityThreshold(n, threshold_param, min_thr, max_thr);
     } else {
         final_threshold = threshold_param;
     }
+
     const bool is_planar = planarity < final_threshold;
-    Eigen::Vector3d normal = evecs.col(0);
+    // Pháp tuyến là eigenvector ứng với eigenvalue nhỏ nhất, cần chuẩn hóa
+    Eigen::Vector3d normal = evecs.col(0).normalized(); 
+    
     return {is_planar, normal};
 }
 
 // --- Parallel Hybrid Correspondence Search ---
-// [SỬA 3] Thêm tham số adaptive_base vào đây
 HybridCorrespondence ComputeHybridCorrespondencesParallel(
     const std::vector<Eigen::Vector3d>& source_points,
     const genz_icp::VoxelHashMap& voxel_map,
     double max_correspondence_distance,
-    double threshold_param, // base hoặc fixed
+    double threshold_param, 
     bool use_adaptive,
-    double min_thr, // Mới
-    double max_thr  // Mới
+    double min_thr, 
+    double max_thr 
     )
 {
     struct LocalBuf {
@@ -121,13 +128,11 @@ HybridCorrespondence ComputeHybridCorrespondencesParallel(
             for (size_t i = r.begin(); i != r.end(); ++i) {
                 const auto& pt = source_points[i];
                 
-                // Call the NEW function in VoxelHashMap
                 auto [closest, neighbors, dist] = voxel_map.GetClosestNeighborAndNeighbors(pt);
                 
                 if (dist > max_correspondence_distance) continue;
 
-                if (neighbors.size() >= 5) { // Min neighbors for PCA
-                    // [SỬA 4] Truyền adaptive_base vào hàm estimate
+                if (neighbors.size() >= 5) { // Min neighbors for Normal Estimation
                     auto [is_planar, normal] = EstimateNormalAndPlanarity(neighbors, threshold_param, use_adaptive, min_thr, max_thr);
                     if (is_planar) {
                         buf.src_planar.push_back(pt);
@@ -140,7 +145,6 @@ HybridCorrespondence ComputeHybridCorrespondencesParallel(
                         buf.non_planar_count++;
                     }
                 } else {
-                    // Fallback to point-to-point if not enough neighbors
                     buf.src_non_planar.push_back(pt);
                     buf.tgt_non_planar.push_back(closest);
                     buf.non_planar_count++;
@@ -244,7 +248,6 @@ std::tuple<Eigen::Matrix6d, Eigen::Vector6d> BuildLinearSystem(
         return J;
     };
 
-
     size_t total_size = src_planar.size() + src_non_planar.size();
     const auto &[JTJ, JTr] = tbb::parallel_reduce(
         tbb::blocked_range<size_t>(0, total_size),
@@ -265,18 +268,17 @@ Registration::Registration(int max_num_iteration, double convergence_criterion)
     : max_num_iterations_(max_num_iteration), 
       convergence_criterion_(convergence_criterion) {}
 
-// [SỬA 5] Cập nhật hàm RegisterFrame để nhận tham số adaptive_base (khớp với .hpp)
 std::tuple<Sophus::SE3d, std::vector<Eigen::Vector3d>, std::vector<Eigen::Vector3d>> Registration::RegisterFrame(
-                                                                                                    const std::vector<Eigen::Vector3d> &frame,
-                                                                                                    const VoxelHashMap &voxel_map,
-                                                                                                    const Sophus::SE3d &initial_guess,
-                                                                                                    double max_correspondence_distance,
-                                                                                                    double kernel,
-                                                                                                    double adaptive_base,
-                                                                                                    bool use_adaptive,
-                                                                                                    double min_thr, // Nhận vào
-                                                                                                    double max_thr  // Nhận vào
-                                                                                                ) { // <--- Nhận tham số ở đây
+                                                                                                const std::vector<Eigen::Vector3d> &frame,
+                                                                                                const VoxelHashMap &voxel_map,
+                                                                                                const Sophus::SE3d &initial_guess,
+                                                                                                double max_correspondence_distance,
+                                                                                                double kernel,
+                                                                                                double adaptive_base,
+                                                                                                bool use_adaptive,
+                                                                                                double min_thr, 
+                                                                                                double max_thr  
+                                                                                            ) {
     
     std::vector<Eigen::Vector3d> final_planar_points;
     std::vector<Eigen::Vector3d> final_non_planar_points;
@@ -291,20 +293,20 @@ std::tuple<Sophus::SE3d, std::vector<Eigen::Vector3d>, std::vector<Eigen::Vector
     Sophus::SE3d T_icp = Sophus::SE3d();
     for (int j = 0; j < max_num_iterations_; ++j) {
         
-        // [SỬA 6] Truyền adaptive_base vào hàm tìm kiếm tương ứng
         auto corr = ComputeHybridCorrespondencesParallel(
             source, 
             voxel_map, 
             max_correspondence_distance, 
-            adaptive_base, // Truyền tham số này (nó chứa giá trị threshold cần dùng)
-            use_adaptive,   // Truyền cờ
-            min_thr, // Truyền đi
-            max_thr  // Truyền đi
+            adaptive_base,
+            use_adaptive,  
+            min_thr,
+            max_thr 
         );
 
+        // [KHÔI PHỤC] Tính Alpha động - Bắt buộc để chạy Hybrid
         double total_points = static_cast<double>(corr.planar_count + corr.non_planar_count);
         double alpha = (total_points > 0.0) ? static_cast<double>(corr.planar_count) / total_points : 0.5;
-        // double alpha = 1;
+
         // Feed data to the solver
         const auto &[JTJ, JTr] = BuildLinearSystem(
             corr.src_planar, corr.tgt_planar, corr.normals, 
