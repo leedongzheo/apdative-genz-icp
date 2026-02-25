@@ -34,13 +34,13 @@ namespace genz_icp {
 std::tuple<Eigen::Vector3d, std::vector<Eigen::Vector3d>, double>
 VoxelHashMap::GetClosestNeighborAndNeighbors(const Eigen::Vector3d &query) const {
     Eigen::Vector3d closest_neighbor = Eigen::Vector3d::Zero();
-    double closest_distance = std::numeric_limits<double>::max();
+    double closest_squared_distance = std::numeric_limits<double>::max(); // SỬA: Dùng squared distance cho nhanh
     std::vector<Eigen::Vector3d> neighbors;
 
-    // Convert query point to integer voxel coordinates
-    auto kx = static_cast<int>(std::floor(query.x() / voxel_size_));
-    auto ky = static_cast<int>(std::floor(query.y() / voxel_size_));
-    auto kz = static_cast<int>(std::floor(query.z() / voxel_size_));
+    // SỬA LỖI CHÍ MẠNG: Bỏ std::floor, dùng ép kiểu int (Truncation) giống hệt bản GỐC và hàm AddPoints
+    auto kx = static_cast<int>(query.x() / voxel_size_);
+    auto ky = static_cast<int>(query.y() / voxel_size_);
+    auto kz = static_cast<int>(query.z() / voxel_size_);
 
     // Iterate over 27 neighboring voxels
     for (const auto &shift : voxel_shifts) {
@@ -55,14 +55,20 @@ VoxelHashMap::GetClosestNeighborAndNeighbors(const Eigen::Vector3d &query) const
 
             // Find the closest point in this voxel
             for (const auto &pt : points) {
-                double dist = (pt - query).norm();
-                if (dist < closest_distance) {
-                    closest_distance = dist;
+                // SỬA: Dùng squaredNorm thay vì norm để tăng tốc, giống bản Gốc
+                double dist_sq = (pt - query).squaredNorm();
+                if (dist_sq < closest_squared_distance) {
+                    closest_squared_distance = dist_sq;
                     closest_neighbor = pt;
                 }
             }
         }
     }
+    // Trả về khoảng cách thực (căn bậc 2) để so sánh với max_correspondence_distance bên ngoài
+    double closest_distance = (closest_squared_distance < std::numeric_limits<double>::max()) 
+                            ? std::sqrt(closest_squared_distance) 
+                            : std::numeric_limits<double>::max();
+
     return {closest_neighbor, neighbors, closest_distance};
 }
 // ==============================================================
@@ -76,9 +82,10 @@ std::tuple<Eigen::Vector3d, size_t, Eigen::Matrix3d, double> VoxelHashMap::GetCl
     double closest_squared_distance = std::numeric_limits<double>::max();
     size_t n_neighbors = 0;
     
-    auto kx = static_cast<int>(std::floor(query.x() / voxel_size_));
-    auto ky = static_cast<int>(std::floor(query.y() / voxel_size_));
-    auto kz = static_cast<int>(std::floor(query.z() / voxel_size_));
+    // Đã được đồng bộ không dùng std::floor
+    auto kx = static_cast<int>(query.x() / voxel_size_);
+    auto ky = static_cast<int>(query.y() / voxel_size_);
+    auto kz = static_cast<int>(query.z() / voxel_size_);
 
     std::for_each(voxel_shifts.cbegin(), voxel_shifts.cend(), [&](const auto &voxel_shift) {
         Voxel voxel(kx+voxel_shift.x(), ky+voxel_shift.y(), kz+voxel_shift.z());
@@ -230,6 +237,7 @@ void VoxelHashMap::Update(const Vector3dVector &points, const Sophus::SE3d &pose
 
 void VoxelHashMap::AddPoints(const std::vector<Eigen::Vector3d> &points) {
     std::for_each(points.cbegin(), points.cend(), [&](const auto &point) {
+        // Bản Gốc dùng cast<int>() ở đây
         auto voxel = Voxel((point / voxel_size_).template cast<int>());
         auto search = map_.find(voxel);
         if (search != map_.end()) {
