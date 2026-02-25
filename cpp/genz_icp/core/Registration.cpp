@@ -304,7 +304,7 @@ std::tuple<Sophus::SE3d, std::vector<Eigen::Vector3d>, std::vector<Eigen::Vector
 
         // double total_points = static_cast<double>(corr.planar_count + corr.non_planar_count);
         // double alpha = (total_points > 0.0) ? static_cast<double>(corr.planar_count) / total_points : 0.5;
-        double alpha = 0;
+        double alpha = 1;
         // Feed data to the solver
         const auto &[JTJ, JTr] = BuildLinearSystem(
             corr.src_planar, corr.tgt_planar, corr.normals, 
